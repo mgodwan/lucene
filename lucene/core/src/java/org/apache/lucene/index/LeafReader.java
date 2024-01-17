@@ -181,6 +181,15 @@ public abstract class LeafReader extends IndexReader {
   public abstract SortedDocValues getSortedDocValues(String field) throws IOException;
 
   /**
+   * Aggregate doc values
+   *
+   * @throws IOException if an I/O error occurred
+   */
+  public Object getAggregatedDocValues() throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+  /**
    * Returns {@link SortedNumericDocValues} for this field, or null if no {@link
    * SortedNumericDocValues} were indexed for this field. The returned instance should only be used
    * by a single thread.

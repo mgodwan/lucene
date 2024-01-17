@@ -413,7 +413,7 @@ final class IndexingChain implements Accountable {
           perField = perField.next;
         }
       }
-
+      if (dvConsumer != null) dvConsumer.aggregate();
       // TODO: catch missing DV fields here?  else we have
       // null/"" depending on how docs landed in segments?
       // but we can't detect all cases, and we should leave
