@@ -18,11 +18,10 @@ package org.apache.lucene.index;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -51,7 +50,7 @@ import org.apache.lucene.util.InfoStream;
  * <p>Threads:
  *
  * <p>Multiple threads are allowed into addDocument at once. There is an initial synchronized call
- * to {@link DocumentsWriterFlushControl#obtainAndLock()} which allocates a DWPT for this indexing
+ * to {@link DocumentsWriterFlushControl#obtainAndLock(SegmentBucket)} which allocates a DWPT for this indexing
  * thread. The same thread will not necessarily get the same DWPT over time. Then updateDocuments is
  * called on that DWPT without synchronization (most of the "heavy lifting" is in this call). Once a
  * DWPT fills up enough RAM or hold enough documents in memory the DWPT is checked out for flush and
@@ -120,7 +119,7 @@ final class DocumentsWriter implements Closeable, Accountable {
     this.deleteQueue = new DocumentsWriterDeleteQueue(infoStream);
     this.perThreadPool =
         new DocumentsWriterPerThreadPool(
-            () -> {
+            (sb) -> {
               final FieldInfos.Builder infos = new FieldInfos.Builder(globalFieldNumberMap);
               return new DocumentsWriterPerThread(
                   indexCreatedVersionMajor,
@@ -131,7 +130,7 @@ final class DocumentsWriter implements Closeable, Accountable {
                   deleteQueue,
                   infos,
                   pendingNumDocs,
-                  enableTestPoints);
+                  enableTestPoints, sb);
             });
     this.pendingNumDocs = pendingNumDocs;
     flushControl = new DocumentsWriterFlushControl(this, config);
@@ -413,13 +412,47 @@ final class DocumentsWriter implements Closeable, Accountable {
     return hasEvents;
   }
 
+  private String getHour(Iterable<? extends Iterable<? extends IndexableField>> docs) {
+    Iterator<? extends IndexableField> docIt = docs.iterator().next().iterator();
+    while (docIt.hasNext()) {
+      IndexableField field = docIt.next();
+      if (field.numericValue() != null && field.name().equals("@timestamp")) {
+        long dateInMills = field.numericValue().longValue();
+        LocalDateTime timeOfDay = Instant.ofEpochMilli(dateInMills)
+                .atOffset(ZoneOffset.UTC)
+                .toLocalDateTime();
+        int dayOfMonth = timeOfDay.getDayOfYear();
+        int hour = timeOfDay.getHour();
+        return dayOfMonth + "_" + hour;
+      }
+    }
+    return "0_0";
+  }
+
+  private String getStatusBucket(Iterable<? extends Iterable<? extends IndexableField>> docs) {
+//    Iterator<? extends IndexableField> docIt = docs.iterator().next().iterator();
+//    while (docIt.hasNext()) {
+//      IndexableField field = docIt.next();
+//      if (field.numericValue() != null && field.name().equals("elb_status") && field.numericValue().intValue() / 100 == 4) {
+//        return "4";
+//      } else if (field.numericValue() != null && field.name().equals("elb_status") && field.numericValue().intValue() / 100 == 5) {
+//        return "5";
+//      }
+//    }
+    return "0";
+  }
+
+  private SegmentBucket getBucket(Iterable<? extends Iterable<? extends IndexableField>> docs) {
+    return SegmentBucket.getBucket(getStatusBucket(docs) + "_" + getHour(docs));
+  }
+
   long updateDocuments(
       final Iterable<? extends Iterable<? extends IndexableField>> docs,
       final DocumentsWriterDeleteQueue.Node<?> delNode)
       throws IOException {
     boolean hasEvents = preUpdate();
 
-    final DocumentsWriterPerThread dwpt = flushControl.obtainAndLock();
+    final DocumentsWriterPerThread dwpt = flushControl.obtainAndLock(getBucket(docs));
     final DocumentsWriterPerThread flushingDWPT;
     long seqNo;
 

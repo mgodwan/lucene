@@ -22,9 +22,11 @@ import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.util.ThreadInterruptedException;
 
@@ -42,21 +44,32 @@ import org.apache.lucene.util.ThreadInterruptedException;
  */
 final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerThread>, Closeable {
 
-  private final Set<DocumentsWriterPerThread> dwpts =
-      Collections.newSetFromMap(new IdentityHashMap<>());
-  private final ConcurrentApproximatePriorityQueue<DocumentsWriterPerThread> freeList =
-      new ConcurrentApproximatePriorityQueue<>();
-  private final Supplier<DocumentsWriterPerThread> dwptFactory;
+  private final Map<SegmentBucket, Set<DocumentsWriterPerThread>> dwpts = new ConcurrentHashMap<>();
+
+  private final Map<SegmentBucket, ConcurrentApproximatePriorityQueue<DocumentsWriterPerThread>> freeList =
+          new ConcurrentHashMap<>();
+  private final Function<SegmentBucket, DocumentsWriterPerThread> dwptFactory;
   private int takenWriterPermits = 0;
   private volatile boolean closed;
 
-  DocumentsWriterPerThreadPool(Supplier<DocumentsWriterPerThread> dwptFactory) {
+  DocumentsWriterPerThreadPool(Function<SegmentBucket, DocumentsWriterPerThread> dwptFactory) {
     this.dwptFactory = dwptFactory;
+//    dwpts.put(SegmentBucket.DEFAULT, Collections.newSetFromMap(new IdentityHashMap<>()));
+//    dwpts.put(SegmentBucket.ONE, Collections.newSetFromMap(new IdentityHashMap<>()));
+//    dwpts.put(SegmentBucket.TWO, Collections.newSetFromMap(new IdentityHashMap<>()));
+//
+//    freeList.put(SegmentBucket.DEFAULT, new ConcurrentApproximatePriorityQueue<>());
+//    freeList.put(SegmentBucket.ONE, new ConcurrentApproximatePriorityQueue<>());
+//    freeList.put(SegmentBucket.TWO, new ConcurrentApproximatePriorityQueue<>());
   }
 
   /** Returns the active number of {@link DocumentsWriterPerThread} instances. */
   synchronized int size() {
-    return dwpts.size();
+    int total = 0;
+    for (SegmentBucket bucket: dwpts.keySet()) {
+      total += dwpts.get(bucket).size();
+    }
+    return total;
   }
 
   synchronized void lockNewWriters() {
@@ -82,7 +95,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
    *
    * @return a new {@link DocumentsWriterPerThread}
    */
-  private synchronized DocumentsWriterPerThread newWriter() {
+  private synchronized DocumentsWriterPerThread newWriter(SegmentBucket bucket) {
     assert takenWriterPermits >= 0;
     while (takenWriterPermits > 0) {
       // we can't create new DWPTs while not all permits are available
@@ -99,9 +112,9 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // end of the world it's violating the contract that we don't release any new DWPT after this
     // pool is closed
     ensureOpen();
-    DocumentsWriterPerThread dwpt = dwptFactory.get();
+    DocumentsWriterPerThread dwpt = dwptFactory.apply(bucket);
     dwpt.lock(); // lock so nobody else will get this DWPT
-    dwpts.add(dwpt);
+    getDwpts(bucket).add(dwpt);
     return dwpt;
   }
 
@@ -112,9 +125,9 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
    * This method is used by DocumentsWriter/FlushControl to obtain a DWPT to do an indexing
    * operation (add/updateDocument).
    */
-  DocumentsWriterPerThread getAndLock() {
+  DocumentsWriterPerThread getAndLock(SegmentBucket bucket) {
     ensureOpen();
-    DocumentsWriterPerThread dwpt = freeList.poll(DocumentsWriterPerThread::tryLock);
+    DocumentsWriterPerThread dwpt = getFreeList(bucket).poll(DocumentsWriterPerThread::tryLock);
     if (dwpt != null) {
       return dwpt;
     }
@@ -122,7 +135,15 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // `freeList` at this point, it will be added later on once DocumentsWriter has indexed a
     // document into this DWPT and then gives it back to the pool by calling
     // #marksAsFreeAndUnlock.
-    return newWriter();
+    return newWriter(bucket);
+  }
+
+  private ConcurrentApproximatePriorityQueue<DocumentsWriterPerThread> getFreeList(final SegmentBucket bucket) {
+    return freeList.computeIfAbsent(bucket, b -> new ConcurrentApproximatePriorityQueue<DocumentsWriterPerThread>());
+  }
+
+  private Set<DocumentsWriterPerThread> getDwpts(final SegmentBucket bucket) {
+    return dwpts.computeIfAbsent(bucket, b -> Collections.newSetFromMap(new IdentityHashMap<>()));
   }
 
   private void ensureOpen() {
@@ -132,21 +153,25 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
   }
 
   private synchronized boolean contains(DocumentsWriterPerThread state) {
-    return dwpts.contains(state);
+    return getDwpts(state.bucket).contains(state);
   }
 
   void marksAsFreeAndUnlock(DocumentsWriterPerThread state) {
     final long ramBytesUsed = state.ramBytesUsed();
     assert contains(state)
         : "we tried to add a DWPT back to the pool but the pool doesn't know about this DWPT";
-    freeList.add(state, ramBytesUsed);
+    getFreeList(state.bucket).add(state, ramBytesUsed);
     state.unlock();
   }
 
   @Override
   public synchronized Iterator<DocumentsWriterPerThread> iterator() {
     // copy on read - this is a quick op since num states is low
-    return List.copyOf(dwpts).iterator();
+    List<DocumentsWriterPerThread> list = new ArrayList<>();
+    for (SegmentBucket bucket: dwpts.keySet()) {
+      list.addAll(dwpts.get(bucket));
+    }
+    return list.iterator();
   }
 
   /**
@@ -182,10 +207,10 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // #getAndLock cannot pull this DWPT out of the pool since #getAndLock does a DWPT#tryLock to
     // check if the DWPT is available.
     assert perThread.isHeldByCurrentThread();
-    if (dwpts.remove(perThread)) {
-      freeList.remove(perThread);
+    if (getDwpts(perThread.bucket).remove(perThread)) {
+      getFreeList(perThread.bucket).remove(perThread);
     } else {
-      assert freeList.contains(perThread) == false;
+      assert getFreeList(perThread.bucket).contains(perThread) == false;
       return false;
     }
     return true;
@@ -193,7 +218,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
 
   /** Returns <code>true</code> if this DWPT is still part of the pool */
   synchronized boolean isRegistered(DocumentsWriterPerThread perThread) {
-    return dwpts.contains(perThread);
+    return getDwpts(perThread.bucket).contains(perThread);
   }
 
   @Override

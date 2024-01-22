@@ -3996,7 +3996,7 @@ public class TestIndexWriter extends LuceneTestCase {
               List<Closeable> states = new ArrayList<>();
               try {
                 for (int i = 0; i < 100; i++) {
-                  DocumentsWriterPerThread state = w.docWriter.perThreadPool.getAndLock();
+                  DocumentsWriterPerThread state = w.docWriter.perThreadPool.getAndLock(SegmentBucket.DEFAULT);
                   states.add(state::unlock);
                   state.deleteQueue.getNextSequenceNumber();
                 }
