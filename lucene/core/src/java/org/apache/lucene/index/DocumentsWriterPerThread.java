@@ -50,13 +50,13 @@ import org.apache.lucene.util.Version;
 final class DocumentsWriterPerThread implements Accountable {
 
   private Throwable abortingException;
+  public final SegmentBucket bucket;
 
   private void onAbortingException(Throwable throwable) {
     assert throwable != null : "aborting exception must not be null";
     assert abortingException == null : "aborting exception has already been set";
     abortingException = throwable;
   }
-
   final boolean isAborted() {
     return aborted;
   }
@@ -149,7 +149,8 @@ final class DocumentsWriterPerThread implements Accountable {
       DocumentsWriterDeleteQueue deleteQueue,
       FieldInfos.Builder fieldInfos,
       AtomicLong pendingNumDocs,
-      boolean enableTestPoints) {
+      boolean enableTestPoints,
+      SegmentBucket bucket) {
     this.indexMajorVersionCreated = indexMajorVersionCreated;
     this.directory = new TrackingDirectoryWrapper(directory);
     this.fieldInfos = fieldInfos;
@@ -161,6 +162,7 @@ final class DocumentsWriterPerThread implements Accountable {
     this.deleteQueue = Objects.requireNonNull(deleteQueue);
     assert numDocsInRAM == 0 : "num docs " + numDocsInRAM;
     deleteSlice = deleteQueue.newSlice();
+    this.bucket = bucket;
 
     segmentInfo =
         new SegmentInfo(
@@ -176,6 +178,7 @@ final class DocumentsWriterPerThread implements Accountable {
             StringHelper.randomId(),
             Collections.emptyMap(),
             indexWriterConfig.getIndexSort());
+    segmentInfo.putAttribute("bucket", bucket.toString());
     assert numDocsInRAM == 0;
     if (INFO_VERBOSE && infoStream.isEnabled("DWPT")) {
       infoStream.message(
