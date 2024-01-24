@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Merges segments of approximately equal size, subject to an allowed number of segments per tier.
@@ -314,6 +316,8 @@ public class TieredMergePolicy extends MergePolicy {
     return sortedBySize;
   }
 
+  final AtomicLong x = new AtomicLong(0L);
+
   @Override
   public MergeSpecification findMerges(
       MergeTrigger mergeTrigger, SegmentInfos infos, MergeContext mergeContext) throws IOException {
@@ -327,8 +331,16 @@ public class TieredMergePolicy extends MergePolicy {
 
     long mergingBytes = 0;
 
-    List<SegmentSizeAndDocs> sortedInfos = getSortedBySegmentSize(infos, mergeContext);
-    Iterator<SegmentSizeAndDocs> iter = sortedInfos.iterator();
+    List<SegmentSizeAndDocs> rawSortedInfos = getSortedBySegmentSize(infos, mergeContext);
+    List<SegmentSizeAndDocs> filteredSortedInfos = new ArrayList<>();
+
+    String bucket = Integer.toString((int)(x.getAndIncrement() % 2L));
+    for (SegmentSizeAndDocs seg: rawSortedInfos) {
+      if (bucket.equals(seg.segInfo.info.getAttribute("bucket"))) {
+        filteredSortedInfos.add(seg);
+      }
+    }
+    Iterator<SegmentSizeAndDocs> iter = filteredSortedInfos.iterator();
     while (iter.hasNext()) {
       SegmentSizeAndDocs segSizeDocs = iter.next();
       final long segBytes = segSizeDocs.sizeInBytes;
@@ -371,7 +383,7 @@ public class TieredMergePolicy extends MergePolicy {
     // If we have too-large segments, grace them out of the maximum segment count
     // If we're above certain thresholds of deleted docs, we can merge very large segments.
     int tooBigCount = 0;
-    iter = sortedInfos.iterator();
+    iter = filteredSortedInfos.iterator();
 
     // remove large segments from consideration under two conditions.
     // 1> Overall percent deleted docs relatively small and this segment is larger than 50%
@@ -417,13 +429,13 @@ public class TieredMergePolicy extends MergePolicy {
               + " vs count="
               + infos.size()
               + " (eligible count="
-              + sortedInfos.size()
+              + filteredSortedInfos.size()
               + ") tooBigCount= "
               + tooBigCount,
           mergeContext);
     }
     return doFindMerges(
-        sortedInfos,
+        filteredSortedInfos,
         maxMergedSegmentBytes,
         mergeFactor,
         (int) allowedSegCount,
