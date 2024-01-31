@@ -185,9 +185,7 @@ public abstract class LeafReader extends IndexReader {
    *
    * @throws IOException if an I/O error occurred
    */
-  public Object getAggregatedDocValues() throws IOException {
-    throw new UnsupportedOperationException();
-  }
+  public abstract Object getAggregatedDocValues() throws IOException;
 
   /**
    * Returns {@link SortedNumericDocValues} for this field, or null if no {@link
