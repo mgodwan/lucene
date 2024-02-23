@@ -54,6 +54,11 @@ public class TermVectorLeafReader extends LeafReader {
   private final Fields fields;
   private final FieldInfos fieldInfos;
 
+  @Override
+  public Object getAggregatedDocValues() throws IOException {
+    return null;
+  }
+
   public TermVectorLeafReader(String field, Terms terms) {
     fields =
         new Fields() {

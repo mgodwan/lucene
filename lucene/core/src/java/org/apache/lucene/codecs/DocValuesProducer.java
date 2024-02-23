@@ -93,10 +93,7 @@ public abstract class DocValuesProducer implements Closeable {
     return this;
   }
 
-  /** StarTreeAggregatedValues is the return type
-   * Todo : don't return object
-   *
-   */
+  /** StarTreeAggregatedValues is the return type Todo : don't return object */
   public Object getAggregatedDocValues() throws IOException {
     // No-op by default
     return null;

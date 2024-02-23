@@ -182,8 +182,7 @@ final class IndexingChain implements Accountable {
       }
 
       @Override
-      public Object getAggregatedDocValues()
-          throws IOException {
+      public Object getAggregatedDocValues() throws IOException {
         return null;
       }
 
@@ -419,7 +418,8 @@ final class IndexingChain implements Accountable {
           perField = perField.next;
         }
       }
-      // IMPORTANT : This call creates the star tree data structures along with the associated doc values in the POC
+      // IMPORTANT : This call creates the star tree data structures along with the associated doc
+      // values in the POC
       if (dvConsumer != null) dvConsumer.aggregate();
       // TODO: catch missing DV fields here?  else we have
       // null/"" depending on how docs landed in segments?
@@ -893,8 +893,7 @@ final class IndexingChain implements Accountable {
             }
 
             @Override
-            public Object getAggregatedDocValues()
-                throws IOException {
+            public Object getAggregatedDocValues() throws IOException {
               return null;
             }
 

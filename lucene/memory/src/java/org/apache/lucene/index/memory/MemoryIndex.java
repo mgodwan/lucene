@@ -1291,6 +1291,11 @@ public class MemoryIndex {
     private final MemoryFields memoryFields = new MemoryFields(fields);
     private final FieldInfos fieldInfos;
 
+    @Override
+    public Object getAggregatedDocValues() throws IOException {
+      return null;
+    }
+
     private MemoryIndexReader() {
       super(); // avoid as much superclass baggage as possible
 

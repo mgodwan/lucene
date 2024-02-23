@@ -47,6 +47,11 @@ public class TestSegmentToThreadMapping extends LuceneTestCase {
       }
 
       @Override
+      public Object getAggregatedDocValues() throws IOException {
+        return null;
+      }
+
+      @Override
       public int numDocs() {
         return maxDoc;
       }

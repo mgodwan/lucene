@@ -43,9 +43,9 @@ version = {
   
   // Jenkins can just set just a suffix, overriding SNAPSHOT, e.g. using build id:
   //  -Dversion.suffix=jenkins123
-  
-  //String versionSuffix = propertyOrDefault('version.suffix', '')
-  return propertyOrDefault('version.release', "${baseVersion}")
+
+  String versionSuffix = propertyOrDefault('version.suffix', 'SNAPSHOT')
+  return propertyOrDefault('version.release', "${baseVersion}-${versionSuffix}")
 }()
 description = 'Grandparent project for Apache Lucene Core'
 
